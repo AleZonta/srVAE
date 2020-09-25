@@ -1,7 +1,7 @@
 # Ignore data and log folders
 /data
 !/data/**/*.gitkeep
-
+.idea/
 /logs
 !/logs/**/*.gitkeep
 
