@@ -1,101 +1,62 @@
-import os
-import math
+
 import numpy as np
-
+import torch
+import torch.utils.data as data_utils
+from sklearn.preprocessing import minmax_scale
 from torchvision import transforms
-from torch.utils.data import DataLoader
-from torch.utils.data.sampler import SubsetRandomSampler
 
-from src.utils import args
-from .datasets import CIFAR10, CelebA, Imagenette, ImageNet32, ImageNet64
+from src.data.Audio.CustomTensor import CustomTensorDataset
+from src.data.Audio.TorchLoader import TorchLoader
 
 
-ROOT = './data_root/'
+def dataloader(args, log):
+    audio = TorchLoader(path_source=args.source_folder, log=log, sample_rate=args.sample_rate)
+    x_train, train_y, x_val, val_y, x_test, test_y = audio.load_data(
+        source_path=args.source_folder).load_files().save_data(
+        destination_path=args.source_folder).get_data()
 
+    x_train = minmax_scale(x_train)
+    x_val = minmax_scale(x_val)
+    x_test = minmax_scale(x_test)
 
-# ----- Dataset Splitter -----
+    x_train = np.reshape(x_train, (-1, args.in_channels, args.x, args.y))
+    x_val = np.reshape(x_val, (-1, args.in_channels, args.x, args.y))
+    x_test = np.reshape(x_test, (-1, args.in_channels, args.x, args.y))
 
-def get_samplers(num_train, valid_size):
-    use_percentage=True if isinstance(valid_size, float) else False
+    class PadNumpy(object):
 
-    # obtain training indices that will be used for validation
-    indices = list(range(num_train))
-    if use_percentage:
-        np.random.shuffle(indices)
-        split = int(np.floor(valid_size * num_train))
-        train_idx, valid_idx = indices[split:], indices[:split]
-    else:
-        train_idx, valid_idx = indices[:-valid_size], indices[-valid_size:]
+        def __init__(self, type_padding):
+            self._type_padding = type_padding
 
-    # define samplers for obtaining training and validation batches
-    train_sampler = SubsetRandomSampler(train_idx)
-    valid_sampler = SubsetRandomSampler(valid_idx)
+        def __call__(self, sample):
+            real_shape = sample.shape
+            if real_shape[2] == 49:
+                sample = np.pad(sample, ((0, 0), (0, 0), (8, 7)), self._type_padding)
+            if real_shape[2] == 40:
+                sample = np.pad(sample, ((0, 0), (0, 0), (12, 12)), self._type_padding)
+            if real_shape[1] == 25:
+                sample = np.pad(sample, ((0, 0), (20, 19), (0, 0)), self._type_padding)
+            if real_shape[2] == 99:
+                sample = np.pad(sample, ((0, 0), (0, 0), (15, 14)), self._type_padding)
+            if real_shape[2] == 80:
+                sample = np.pad(sample, ((0, 0), (0, 0), (24, 24)), self._type_padding)
+            if real_shape[1] == 50:
+                sample = np.pad(sample, ((0, 0), (39, 39), (0, 0)), self._type_padding)
+            return sample
 
-    return train_sampler, valid_sampler
+    data_transform_pad = transforms.Compose([
+        PadNumpy("constant"),
+    ])
 
+    train_dataset = CustomTensorDataset(torch.from_numpy(x_train), torch.from_numpy(x_train),
+                                        transform=data_transform_pad)
+    train_loader = data_utils.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
-# ----- Data Transformations -----
+    validation_dataset = CustomTensorDataset(torch.from_numpy(x_val), torch.from_numpy(x_val),
+                                             transform=data_transform_pad)
+    val_loader = data_utils.DataLoader(validation_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-def data_transformations(dataset):
-    if dataset in ['CIFAR10', 'Imagenette', 'ImageNet32', 'ImageNet64']:
-        res = args.img_resize if args.img_resize is not None else 32
+    test_dataset = CustomTensorDataset(torch.from_numpy(x_test), torch.from_numpy(x_test), transform=data_transform_pad)
+    test_loader = data_utils.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-        train_transform = transforms.Compose([
-            transforms.Resize((res, res)),
-            transforms.RandomHorizontalFlip(),
-            transforms.Pad(int(math.ceil(res * 0.05)), padding_mode='edge'),
-            transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
-            transforms.CenterCrop(res),
-            transforms.ToTensor()
-        ])
-
-        valid_transform = transforms.Compose([
-            transforms.Resize((res, res)),
-            transforms.ToTensor()
-        ])
-
-    elif dataset in ['CelebA']:
-        Crop = transforms.Lambda(lambda x: transforms.functional.crop(x, 40, 15, 148, 148))
-        res = args.resolution
-
-        train_transform = valid_transform = transforms.Compose([
-            Crop,
-            transforms.Resize((res, res)),
-            transforms.ToTensor()
-        ])
-
-    else:
-        raise NotImplementedError
-
-    return train_transform, valid_transform
-
-
-# ----- DataLoader -----
-
-def dataloader(dataset=args.dataset, data_root=ROOT, batch_size=args.batch_size, num_workers=6, pin_memory=True):
-    # dataset and data loader kwargs
-    kwargs = {} if args.device == 'cpu' else {'num_workers': num_workers, 'pin_memory': pin_memory}
-    dataset_kwargs = {'root':os.path.join(data_root, dataset), 'download':True}
-    loader_kwargs = {'batch_size':batch_size, **kwargs}
-
-    # get data transformation
-    train_transform, valid_transform = data_transformations(dataset)
-
-    # build datasets
-    train_data = globals()[dataset](train=True,  transform=train_transform, **dataset_kwargs)
-    valid_data = globals()[dataset](train=True,  transform=valid_transform, **dataset_kwargs)
-    test_data  = globals()[dataset](train=False, transform=valid_transform, **dataset_kwargs)
-
-    # define samplers for obtaining training and validation batches
-    train_sampler, valid_sampler = get_samplers(len(train_data), 0.15)
-
-    # Build dataloaders
-    train_loader = DataLoader(train_data, sampler=train_sampler, **loader_kwargs)
-    valid_loader = DataLoader(valid_data, sampler=valid_sampler, **loader_kwargs)
-    test_loader  = DataLoader(test_data,  shuffle=False, **loader_kwargs)
-
-    return train_loader, valid_loader, test_loader
-
-
-if __name__ == "__main__":
-    pass
+    return train_loader, val_loader, test_loader

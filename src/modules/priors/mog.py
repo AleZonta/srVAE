@@ -1,38 +1,30 @@
-import numpy as np
-
-import torch
-import torch.nn as nn
-from torch.autograd import Variable
-
-
 from .prior import Prior
-from src.modules.nn_layers import *
 from src.modules.distributions import *
-from src.utils import args
 
 
 # Modified vertion of: https://github.com/divymurli/VAEs
 
 class MixtureOfGaussians(Prior):
-    def __init__(self, z_shape, num_mixtures=1000):
+    def __init__(self, z_shape, args, num_mixtures=1000):
         super().__init__()
         self.z_shape = z_shape
         self.z_dim = np.prod(z_shape)
         self.k = num_mixtures
+        self.args = args
 
         # Mixture of Gaussians prior
         self.z_pre = torch.nn.Parameter(torch.randn(1, 2 * self.k, self.z_dim).to(args.device)
-                                / np.sqrt(self.k * self.z_dim))
+                                        / np.sqrt(self.k * self.z_dim))
 
         # Uniform weighting
-        self.pi = torch.nn.Parameter(torch.ones(self.k).to(args.device) / self.k,
-                                    requires_grad=False)
+        self.pi = torch.nn.Parameter(torch.ones(self.k).to(self.args.device) / self.k,
+                                     requires_grad=False)
 
     def sample_gaussian(self, m, v):
         """ Element-wise application reparameterization trick to sample from Gaussian
         """
-        sample = torch.randn(m.shape).to(args.device)
-        z = m + (v**0.5)*sample
+        sample = torch.randn(m.shape).to(self.args.device)
+        z = m + (v ** 0.5) * sample
         return z
 
     def log_sum_exp(self, x, dim=0):
@@ -52,9 +44,9 @@ class MixtureOfGaussians(Prior):
             last dim. Basically we're assuming all dims are batch dims except for the
             last dim.
         """
-        const   = -0.5 * x.size(-1) * torch.log(2*torch.tensor(np.pi))
-        log_det = -0.5 * torch.sum(torch.log(v), dim = -1)
-        log_exp = -0.5 * torch.sum((x - m)**2/v, dim = -1)
+        const = -0.5 * x.size(-1) * torch.log(2 * torch.tensor(np.pi))
+        log_det = -0.5 * torch.sum(torch.log(v), dim=-1)
+        log_exp = -0.5 * torch.sum((x - m) ** 2 / v, dim=-1)
 
         log_prob = const + log_det + log_exp
         return log_prob
@@ -86,13 +78,9 @@ class MixtureOfGaussians(Prior):
         """
         Computes the mixture of Gaussian prior
         """
-        m, v  = self.gaussian_parameters(self.z_pre, dim=1)
+        m, v = self.gaussian_parameters(self.z_pre, dim=1)
         log_p_z = self.log_normal_mixture(z, m, v)
         return log_p_z
 
     def __str__(self):
-      return "MixtureOfGaussians"
-
-
-if __name__ == "__main__":
-    pass
+        return "MixtureOfGaussians"

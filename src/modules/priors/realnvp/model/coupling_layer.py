@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 
 from enum import IntEnum
-from ..util import checkerboard_mask
 
 from src.modules.nn_layers import *
-
+from src.modules.priors.realnvp.util.array_util import checkerboard_mask
 
 
 class MaskType(IntEnum):

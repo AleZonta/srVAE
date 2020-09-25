@@ -1,7 +1,8 @@
-from torch.optim.lr_scheduler import _LRScheduler
 
 
 # ----- Scheduler -----
+from torch.optim.lr_scheduler import _LRScheduler
+
 
 class LowerBoundedExponentialLR(_LRScheduler):
     def __init__(self, optimizer, gamma, lower_bound, last_epoch=-1):

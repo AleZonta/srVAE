@@ -6,17 +6,11 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 
-from src.utils import args, get_shape
-from src.modules import *
-
+from src.modules.distributions import dmol_loss, sample_from_dmol, log_normal_diag
 
 # ----- NN Model Seleciton -----
-
-if args.model == 'srVAE':
-    if args.network == 'densenet16x32':
-        from .image_networks.densenet16x32 import *
-    else:
-        raise NotImplementedError("Please use 'densenet16x32' as 'network' argument.")
+from .image_networks.densenet16x32 import q_u, p_z, q_z, p_y, p_x
+from ...utils.utils import get_shape
 
 
 # ----- Two Staged VAE -----
@@ -29,12 +23,15 @@ class srVAE(nn.Module):
     Author:
     Ioannis Gatopoulos.
     """
-    def __init__(self, x_shape, y_shape=(3, 16, 16), u_dim=args.u_dim, z_dim=args.z_dim, prior=args.prior, device=args.device):
+
+    def __init__(self, x_shape, args, y_shape=(3, 16, 16)):
         super().__init__()
         self.device = args.device
         self.x_shape = x_shape
         self.y_shape = (x_shape[0], y_shape[1], y_shape[2])
-
+        u_dim = args.u_dim
+        z_dim = args.z_dim
+        prior = args.prior
         self.u_shape = get_shape(u_dim)
         self.z_shape = get_shape(z_dim)
 
@@ -58,22 +55,20 @@ class srVAE(nn.Module):
         self.q_z = q_z(self.z_shape, self.x_shape)
 
         # p(y | u)
-        self.p_y = p_y(self.y_shape, self.u_shape)
+        self.p_y = p_y(self.y_shape, self.u_shape, args)
 
         # p(x | y, z)
-        self.p_x = p_x(self.x_shape, (self.y_shape, self.z_shape))
+        self.p_x = p_x(self.x_shape, (self.y_shape, self.z_shape), args)
 
         # likelihood distribution
         self.recon_loss = partial(dmol_loss)
         self.sample_distribution = partial(sample_from_dmol)
-
 
     def compressed_transoformation(self, input):
         y = []
         for x in input:
             y.append(self.compressed_transform(x.cpu()))
         return torch.stack(y).to(self.device)
-
 
     def initialize(self, dataloader):
         """ Data dependent init for weight normalization 
@@ -86,13 +81,11 @@ class srVAE(nn.Module):
             self.calculate_elbo(x, output)
         return
 
-
     @staticmethod
     def reparameterize(z_mean, z_log_var):
         """ z ~ N(z| z_mu, z_logvar) """
         epsilon = torch.randn_like(z_mean)
-        return z_mean + torch.exp(0.5*z_log_var)*epsilon
-
+        return z_mean + torch.exp(0.5 * z_log_var) * epsilon
 
     @torch.no_grad()
     def generate(self, n_samples=20):
@@ -112,14 +105,12 @@ class srVAE(nn.Module):
         x_hat = self.sample_distribution(x_logits, nc=self.x_shape[0])
         return x_hat, y_hat
 
-
     @torch.no_grad()
     def reconstruct(self, x, **kwargs):
         outputs = self.forward(x)
         y_hat = self.sample_distribution(outputs.get('y_logits'), nc=self.y_shape[0])
         x_hat = self.sample_distribution(outputs.get('x_logits'), nc=self.x_shape[0])
         return outputs.get('y'), y_hat, x_hat
-
 
     @torch.no_grad()
     def super_resolution(self, y):
@@ -135,7 +126,6 @@ class srVAE(nn.Module):
         x_logits = self.p_x((y, z_p))
         x_hat = self.sample_distribution(x_logits)
         return x_hat
-
 
     def calculate_elbo(self, x, outputs, **kwargs):
         # unpack variables
@@ -161,19 +151,18 @@ class srVAE(nn.Module):
         nelbo = - (RE_x + RE_y - KL_u - KL_z).mean()
 
         diagnostics = {
-            "bpd"   : (nelbo.item()) / (np.prod(x.shape[1:]) * np.log(2.)),
-            "nelbo" : nelbo.item(),
+            "bpd": (nelbo.item()) / (np.prod(x.shape[1:]) * np.log(2.)),
+            "nelbo": nelbo.item(),
 
-            "RE"    : - (RE_x + RE_y).mean().item(),
-            "RE_x"  : - RE_x.mean().item(),
-            "RE_y"  : - RE_y.mean().item(),
+            "RE": - (RE_x + RE_y).mean().item(),
+            "RE_x": - RE_x.mean().item(),
+            "RE_y": - RE_y.mean().item(),
 
-            "KL"    : (KL_z + KL_u).mean().item(),
-            "KL_u"  : KL_u.mean().item(),
-            "KL_z"  : KL_z.mean().item(),
+            "KL": (KL_z + KL_u).mean().item(),
+            "KL_u": KL_u.mean().item(),
+            "KL_z": KL_z.mean().item(),
         }
         return nelbo, diagnostics
-
 
     def forward(self, x, **kwargs):
         """ Forward pass through the inference and the generative model. """
@@ -198,23 +187,19 @@ class srVAE(nn.Module):
         z_p_mean, z_p_logvar = self.p_z((y, u_q))
 
         return {
-            'u_q_mean'   : u_q_mean,
-            'u_q_logvar' : u_q_logvar,
-            'u_q'        : u_q,
+            'u_q_mean': u_q_mean,
+            'u_q_logvar': u_q_logvar,
+            'u_q': u_q,
 
-            'z_q_mean'   : z_q_mean,
-            'z_q_logvar' : z_q_logvar,
-            'z_q'        : z_q,
+            'z_q_mean': z_q_mean,
+            'z_q_logvar': z_q_logvar,
+            'z_q': z_q,
 
-            'z_p_mean'   : z_p_mean,
-            'z_p_logvar' : z_p_logvar,
+            'z_p_mean': z_p_mean,
+            'z_p_logvar': z_p_logvar,
 
-            'y'          : y,
-            'y_logits'   : y_logits,
+            'y': y,
+            'y_logits': y_logits,
 
-            'x_logits'   : x_logits
+            'x_logits': x_logits
         }
-
-
-if __name__ == "__main__":
-    pass

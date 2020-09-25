@@ -1,15 +1,11 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 from src.modules.nn_layers import *
 from src.modules.distributions import n_embenddings
-from src.utils.args import args
 
 
 class q_u(nn.Module):
     """ Encoder q(u|y)
     """
+
     def __init__(self, output_shape, input_shape):
         super().__init__()
         nc_in = input_shape[0]
@@ -29,14 +25,14 @@ class q_u(nn.Module):
         return mu, F.hardtanh(logvar, min_val=-7, max_val=7.)
 
 
-
 class p_y(nn.Module):
     """ Dencoder p(y|u)
     """
-    def __init__(self, output_shape, input_shape):
+
+    def __init__(self, output_shape, input_shape, args):
         super().__init__()
         nc_in = input_shape[0]
-        nc_out = n_embenddings(output_shape[0])
+        nc_out = n_embenddings(output_shape[0], args=args)
 
         self.core_nn = nn.Sequential(
             DenselyDecoder(
@@ -52,10 +48,10 @@ class p_y(nn.Module):
         return logits
 
 
-
 class q_z(nn.Module):
     """ Encoder q(z|x)
     """
+
     def __init__(self, output_shape, input_shape):
         super().__init__()
         nc_in = input_shape[0]
@@ -75,10 +71,10 @@ class q_z(nn.Module):
         return mu, F.hardtanh(logvar, min_val=-7, max_val=7.)
 
 
-
 class p_z(nn.Module):
     """ Encoder p(z| y, u)
     """
+
     def __init__(self, output_shape, input_shape):
         super().__init__()
         nc_y_in, nc_u_in = input_shape[0][0], input_shape[1][0]
@@ -87,7 +83,7 @@ class p_z(nn.Module):
         self.y_nn = nn.Sequential(
             DenselyEncoder(
                 in_channels=nc_y_in,
-                out_channels=nc_out//2,
+                out_channels=nc_out // 2,
                 growth_rate=32,
                 steps=5,
                 scale_factor=1),
@@ -96,8 +92,8 @@ class p_z(nn.Module):
 
         self.u_nn = nn.Sequential(
             DenselyNetwork(
-                in_channels=nc_u_in, 
-                out_channels=nc_out//2,
+                in_channels=nc_u_in,
+                out_channels=nc_out // 2,
                 growth_rate=64,
                 steps=3,
                 blocks=3,
@@ -126,14 +122,14 @@ class p_z(nn.Module):
         return mu, F.hardtanh(logvar, min_val=-7, max_val=7.)
 
 
-
 class p_x(nn.Module):
     """ p(x| y, z)
     """
-    def __init__(self, output_shape, input_shape):
+
+    def __init__(self, output_shape, input_shape, args):
         super().__init__()
         nc_y_in, nc_z_in = input_shape[0][0], input_shape[1][0]
-        nc_out = n_embenddings(output_shape[0])
+        nc_out = n_embenddings(output_shape[0], args)
 
         self.z_nn = nn.Sequential(
             DenselyDecoder(
@@ -154,7 +150,6 @@ class p_x(nn.Module):
                 act=None)
         )
 
-
     def forward(self, input):
         y, z = input[0], input[1]
 
@@ -164,8 +159,3 @@ class p_x(nn.Module):
         joint = torch.cat((y_out, z_out), 1)
         logits = self.core_nn(joint)
         return logits
-
-
-
-if __name__ == "__main__":
-    pass

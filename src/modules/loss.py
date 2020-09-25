@@ -21,7 +21,7 @@ class ELBOLoss(_Loss):
 # ----- NLL -----
 
 @torch.no_grad()
-def calculate_nll(model, test_loader, criterion, args, iw_samples):
+def calculate_nll(model, test_loader, criterion, args, iw_samples, log):
     """
         model:
         test_loader:
@@ -46,7 +46,7 @@ def calculate_nll(model, test_loader, criterion, args, iw_samples):
         # calculate max if importance weighting samples
         nll_x = - logsumexp(torch.tensor(iw_array))
         likelihood_test.append(nll_x + np.log(len(iw_array)))
-        print(i, '/', len(test_loader))
+        log.info(i, '/', len(test_loader))
 
     # calculate full negative log-likelihood
     nll = - torch.tensor(likelihood_test).mean().item()

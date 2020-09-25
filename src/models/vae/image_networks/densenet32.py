@@ -1,12 +1,10 @@
-import torch.nn as nn
-import torch.nn.functional as F
+from abc import ABC
 
-from src.utils.args import args
 from src.modules.nn_layers import *
 from src.modules.distributions import n_embenddings
 
 
-class q_z(nn.Module):
+class q_z(nn.Module, ABC):
     """ Encoder q(z|x)
     """
     def __init__(self, output_shape, input_shape):
@@ -31,10 +29,10 @@ class q_z(nn.Module):
 class p_x(nn.Module):
     """ Dencoder p(x|z)
     """
-    def __init__(self, output_shape, input_shape):
+    def __init__(self, output_shape, input_shape, args):
         super().__init__()
         nc_in = input_shape[0]
-        nc_out = n_embenddings(output_shape[0])
+        nc_out = n_embenddings(output_shape[0], args)
 
         self.core_nn = nn.Sequential(
             DenselyDecoder(
@@ -48,7 +46,3 @@ class p_x(nn.Module):
     def forward(self, input):
         logits = self.core_nn(input)
         return logits
-
-
-if __name__ == "__main__":
-    pass

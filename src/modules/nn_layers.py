@@ -278,7 +278,3 @@ class DenselyDecoder(nn.Module):
 
     def forward(self, x):
         return self.core_nn(x)
-
-
-if __name__ == "__main__":
-    pass

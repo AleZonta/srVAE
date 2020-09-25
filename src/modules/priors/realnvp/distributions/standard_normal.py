@@ -1,6 +1,5 @@
 import math
 import torch
-import torch.nn as nn
 
 
 class StandardNormal:
@@ -28,7 +27,3 @@ class StandardNormal:
 
     def __str__(self):
       return "StandardNormal"
-
-
-if __name__ == "__main__":
-    pass

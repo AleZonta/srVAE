@@ -7,9 +7,6 @@ import torch
 import torch.nn as nn
 
 
-from .args import args
-
-
 # ----- Random Seed Control -----
 
 def fix_random_seed(seed=0):
@@ -26,11 +23,11 @@ def fix_random_seed(seed=0):
 
 # ----- Print Parser -----
 
-def print_args(ARGS):
-    print('\n'+26*'='+' Configuration '+26*'=')
-    for name, var in vars(ARGS).items():
-        print('{} : {}'.format(name, var))
-    print('\n'+25*'='+' Training Starts '+25*'='+'\n')
+def print_args(args, log):
+    log.debug('\n' + 26 * '=' + ' Configuration ' + 26 * '=')
+    for name, var in vars(args).items():
+        log.debug('{} : {}'.format(name, var))
+    log.debug('\n' + 25 * '=' + ' Training Starts ' + 25 * '=' + '\n')
 
 
 # ----- Data Shapes -----
@@ -45,23 +42,21 @@ def get_shape(z_dim):
         re-shape it to an appropriate 3-D tensor.
     """
     d = 8
-    if (z_dim%d==0) and (z_dim // (d*d) > 0):  # cx8x8
+    if (z_dim % d == 0) and (z_dim // (d * d) > 0):  # cx8x8
         H = W = d
-        C = z_dim // (d*d)
+        C = z_dim // (d * d)
         return (C, H, W)
-    raise "Latent space can not mapped to a 3-D tensor. \
-            Please choose another dimentionality (power of 2)."
+    raise Exception("Latent space can not mapped to a 3-D tensor. Please choose another dimentionality (power of 2).")
 
 
 # ----- Logging -----
 
-def log_interval(i, len_data_loader, acc_losses, enable=args.log_interval):
+def log_interval(i, len_data_loader, acc_losses, args, log):
     if args.log_interval:
-        print('{:6d}/{:4d} batch | BPD: {:4.2f}, RE: {:4.2f}, KL: {:4.2f}'.format(
-            i, len_data_loader, acc_losses['bpd']/i, acc_losses['RE']/i, acc_losses['KL']/i), end='\r')
+        log.info(f"{i}/{len_data_loader} batch | BPD: {acc_losses['bpd'] / i}, RE: {acc_losses['RE'] / i}, KL: {acc_losses['KL'] / i}")
 
 
-def logging(epoch, train_losses, valid_losses, is_saved, writer=None):
+def logging(epoch, train_losses, valid_losses, is_saved, log, args, writer=None):
     if writer is not None:
         for loss in train_losses:
             writer.add_scalar('Train Loss/' + loss, train_losses[loss], epoch)
@@ -70,11 +65,12 @@ def logging(epoch, train_losses, valid_losses, is_saved, writer=None):
             writer.add_scalar('Validation Loss/' + loss, valid_losses[loss], epoch)
 
     if is_saved:
-        print('Epoch [{:4d}/{:4d}] | Train bpd: {:4.2f} | Val bpd: {:4.2f} * '.format(
+        log.info('Epoch [{:4d}/{:4d}] | Train bpd: {:4.2f} | Val bpd: {:4.2f} * '.format(
             epoch, args.epochs, train_losses['bpd'], valid_losses['bpd']))
     else:
-        print('Epoch [{:4d}/{:4d}] | Train bpd: {:4.2f} | Val bpd: {:4.2f} '.format(
+        log.info('Epoch [{:4d}/{:4d}] | Train bpd: {:4.2f} | Val bpd: {:4.2f} '.format(
             epoch, args.epochs, train_losses['bpd'], valid_losses['bpd']))
+
 
 # ----- Parameters Counting -----
 
@@ -85,23 +81,25 @@ def get_params(module):
         return 0
 
 
-def n_parameters(model, writer=None):
+def n_parameters(model, logger, writer=None):
     model = model.module if isinstance(model, nn.DataParallel) else model
 
     params_dict = {
-        "total" : get_params(model)
+        "total": get_params(model)
     }
 
     if writer:
-        writer.add_text('n_params', namespace2markdown(Namespace(**params_dict), title='Networks', values='Params'))    
+        writer.add_text('n_params', namespace2markdown(Namespace(**params_dict), title='Networks', values='Params'))
 
-    print(f'# Total Number of Parameters: {params_dict["total"] / 1e6:.3f}M')
+    logger.info("# Total Number of Parameters: {} M".format(params_dict["total"] / 1e6))
 
 
 # ----- Save and Load Model -----
 
 min_loss = None
-def save_model(model, optimizer, loss, epoch, pth='./src/models/'):
+
+
+def save_model(model, optimizer, loss, epoch, args, pth='./src/models/'):
     """ Saves a torch model in two ways: to be retrained and/or for validation only.
     """
     global min_loss
@@ -111,7 +109,6 @@ def save_model(model, optimizer, loss, epoch, pth='./src/models/'):
 
     # create paths
     pth = os.path.join(pth, 'pretrained', args.model)
-    pth = os.path.join(pth, args.dataset)
     pth_inf = os.path.join(pth, 'inference')
     pth_train = os.path.join(pth, 'trainable')
     for p in [pth, pth_inf, pth_train]:
@@ -125,11 +122,11 @@ def save_model(model, optimizer, loss, epoch, pth='./src/models/'):
 
     # model to be used both for Inference and Resuming Training
     torch.save({
-                'epoch': epoch,
-                'model_state_dict': m.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'loss': loss
-                }, pth_train + '/model.pth')
+        'epoch': epoch,
+        'model_state_dict': m.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': loss
+    }, pth_train + '/model.pth')
 
     return True
 
@@ -140,10 +137,7 @@ def namespace2markdown(args, title='Hyperparameter', values='Values'):
     txt = '<table> <thead> <tr> <td> <strong> ' + title + ' </strong> </td> <td> <strong> ' + values + ' </strong> </td> </tr> </thead>'
     txt += ' <tbody> '
     for name, var in vars(args).items():
-        txt += '<tr> <td> <code>' + str(name) + ' </code> </td> ' + '<td> <code> ' + str(var) + ' </code> </td> ' + '<tr> '
+        txt += '<tr> <td> <code>' + str(name) + ' </code> </td> ' + '<td> <code> ' + str(
+            var) + ' </code> </td> ' + '<tr> '
     txt += '</tbody> </table>'
     return markdown(txt)
-
-
-if __name__ == "__main__":
-    pass

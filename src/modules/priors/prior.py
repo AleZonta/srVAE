@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 
@@ -17,7 +16,3 @@ class Prior(nn.Module):
 
     def __str__(self):
         raise NotImplementedError
-
-
-if __name__ == "__main__":
-    pass

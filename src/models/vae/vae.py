@@ -5,20 +5,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from src.utils import args, get_shape
-from src.modules import *
-
-
-# ----- NN Model Seleciton -----
-
-if args.model == 'VAE':
-    if args.network == 'densenet32':
-        from .image_networks.densenet32 import *
-    else:
-        raise NotImplementedError("Please use 'densenet32' as 'network' argument.")
-
+from src.models.vae.image_networks.densenet32 import q_z, p_x
+from src.modules.distributions import dmol_loss, sample_from_dmol, log_normal_diag
 
 # ----- Variational AutoEncoder -----
+from src.modules.priors.mog import MixtureOfGaussians
+from src.modules.priors.realnvp.model.real_nvp import RealNVP
+from src.modules.priors.standard_normal import StandardNormal
+from src.utils.utils import get_shape
+
 
 class VAE(nn.Module):
     """
@@ -27,26 +22,31 @@ class VAE(nn.Module):
     Author:
     Ioannis Gatopoulos.
     """
-    def __init__(self, x_shape, prior=args.prior):
+
+    def __init__(self, x_shape, args):
         super().__init__()
         self.x_shape = x_shape
-
+        self.args = args
         self.z_dim = args.z_dim
         self.z_shape = get_shape(self.z_dim)
 
         # p(z)
-        self.p_z = globals()[prior](self.z_shape)
+        if args.prior == "StandardNormal":
+            self.p_z = StandardNormal(self.z_shape)
+        elif args.prior == "MixtureOfGaussians":
+            self.p_z = MixtureOfGaussians(self.z_shape, args=args)
+        else:
+            self.p_z = RealNVP(self.z_shape, args=args)
 
         # q(z | x)
         self.q_z = q_z(self.z_shape, self.x_shape)
 
         # p(x | z)
-        self.p_x = p_x(self.x_shape, self.z_shape)
+        self.p_x = p_x(self.x_shape, self.z_shape, args=args)
 
         # likelihood distribution
         self.recon_loss = partial(dmol_loss, nc=self.x_shape[0])
         self.sample_distribution = partial(sample_from_dmol, nc=self.x_shape[0])
-
 
     def initialize(self, dataloader):
         """ Data dependent init for weight normalization 
@@ -54,7 +54,7 @@ class VAE(nn.Module):
         """
         with torch.no_grad():
             x, _ = next(iter(dataloader))
-            x = x.to(args.device)
+            x = x.to(self.args.device)
             output = self.forward(x)
             self.calculate_elbo(x, output)
         return
@@ -67,9 +67,9 @@ class VAE(nn.Module):
         return z_mu + torch.exp(0.5 * z_logvar) * epsilon
 
     @torch.no_grad()
-    def generate(self, n_samples=args.n_samples):
+    def generate(self, n_samples):
         # u ~ p(u)
-        z = self.p_z.sample(z_shape=self.z_shape, n_samples=n_samples, device=args.device).to(args.device)
+        z = self.p_z.sample(z_shape=self.z_shape, n_samples=n_samples, device=self.args.device).to(self.args.device, dtype=torch.float64)
         # x ~ p(x| z)
         x_logits = self.p_x(z)
         x_hat = self.sample_distribution(x_logits, random_sample=False)
@@ -86,6 +86,12 @@ class VAE(nn.Module):
         x, x_logits = input, outputs.get('x_logits')
         z_q, z_q_mean, z_q_logvar = outputs.get('z_q'), outputs.get('z_q_mean'), outputs.get('z_q_logvar')
 
+        print("x_shape -> {}".format(x.shape))
+        print("x_logits_shape -> {}".format(x_logits.shape))
+        print("z_q_shape -> {}".format(z_q.shape))
+        print("z_q_mean_shape -> {}".format(z_q_mean.shape))
+        print("z_q_logvar_shape -> {}".format(z_q_logvar.shape))
+
         # Reconstraction loss
         # N E_q [ ln p(x|z) ]
         RE = - self.recon_loss(x, x_logits).mean()
@@ -100,13 +106,12 @@ class VAE(nn.Module):
         nelbo = RE + KL
 
         diagnostics = {
-            "bpd"   : (nelbo.item()) / (np.prod(x.shape[1:]) * np.log(2.)),
-            "nelbo" : nelbo.item(),
-            "RE"    : RE.mean(dim=0).item(),
-            "KL"    : KL.mean(dim=0).item(),
+            "bpd": (nelbo.item()) / (np.prod(x.shape[1:]) * np.log(2.)),
+            "nelbo": nelbo.item(),
+            "RE": RE.mean(dim=0).item(),
+            "KL": KL.mean(dim=0).item(),
         }
         return nelbo, diagnostics
-
 
     def forward(self, x, **kwargs):
         """ Forward pass through the inference and the generative model.
@@ -117,13 +122,8 @@ class VAE(nn.Module):
         # x ~ p(x| z)
         x_logits = self.p_x(z_q)
         return {
-            "z_q"        : z_q,
-            "z_q_mean"   : z_q_mean,
-            "z_q_logvar" : z_q_logvar,
-
-            "x_logits"   : x_logits
+            "z_q": z_q,
+            "z_q_mean": z_q_mean,
+            "z_q_logvar": z_q_logvar,
+            "x_logits": x_logits
         }
-
-
-if __name__ == "__main__":
-    pass

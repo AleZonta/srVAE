@@ -1,33 +1,28 @@
-import numpy as np
 
-import torch
-import torch.nn as nn
-from torch.autograd import Variable
 
 from src.modules.nn_layers import *
 from src.modules.distributions import *
-from src.utils import args
 
 
 class MixtureOfGaussians(nn.Module):
-    def __init__(self, z_shape, num_mixtures=10):
+    def __init__(self, z_shape, args, num_mixtures=10):
         super().__init__()
         self.z_shape = z_shape
         self.z_dim = np.prod(z_shape)
         self.k = num_mixtures
-
+        self.args = args
         # Mixture of Gaussians prior
         self.z_pre = torch.nn.Parameter(torch.randn(1, 2 * self.k, self.z_dim).to(args.device)
                                 / np.sqrt(self.k * self.z_dim))
 
         # Uniform weighting
-        self.pi = torch.nn.Parameter(torch.ones(self.k).to(args.device) / self.k,
+        self.pi = torch.nn.Parameter(torch.ones(self.k).to(self.args.device) / self.k,
                                     requires_grad=False)
 
     def sample_gaussian(self, m, v):
         """ Element-wise application reparameterization trick to sample from Gaussian
         """
-        sample = torch.randn(m.shape).to(args.device)
+        sample = torch.randn(m.shape).to(self.args.device)
         z = m + (v**0.5)*sample
         return z
 
@@ -88,7 +83,3 @@ class MixtureOfGaussians(nn.Module):
 
     def __str__(self):
       return "MixtureOfGaussians"
-
-
-if __name__ == "__main__":
-    pass
